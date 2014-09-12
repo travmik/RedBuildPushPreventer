@@ -1,0 +1,5 @@
+#!/bin/sh
+#
+# pre-push to check build status.
+#PATH_TO_IMPL - is path from root of your git repo to folder with hooks implementation 
+source [PATH_TO_IMPL]/pre-push

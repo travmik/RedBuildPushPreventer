@@ -1,0 +1,81 @@
+#!/bin/sh
+#
+# pre-push to check build status.
+exec < /dev/tty
+
+GREEN="\e[1;32m"
+RED="\e[1;31m"
+YELLOW="\e[1;33m"
+LIGHT_BLUE="\e[1;36m"
+CLEAR="\e[0m"
+
+JENKINS_SERVER=JENKINS_SERVER_HOST
+JOB="NAME_OF_JOB_TO_CHECK"
+JOB_QUERY=/job/${JOB}
+
+BUILD_STATUS_QUERY=/lastCompletedBuild/api/json
+
+CURRENT_BUILD_NUMBER_QUERY=/lastCompletedBuild/buildNumber
+CURRENT_BUILD_JSON=`curl -s ${JENKINS_SERVER}${JOB_QUERY}${CURRENT_BUILD_NUMBER_QUERY}`
+
+LAST_STABLE_BUILD_NUMBER_QUERY=/lastStableBuild/buildNumber
+LAST_STABLE_BUILD_NUMBER=`curl -s ${JENKINS_SERVER}${JOB_QUERY}${LAST_STABLE_BUILD_NUMBER_QUERY}`
+
+check_build()
+{
+    
+    CURRENT_BUILD_NUMBER=${CURRENT_BUILD_JSON}
+	JOB_STATUS_JSON=`curl --silent ${JENKINS_SERVER}${JOB_QUERY}${BUILD_STATUS_QUERY}`
+	RESULT=`echo "${JOB_STATUS_JSON}" | sed -n 's/.*"result":\([\"A-Za-z]*\),.*/\1/p'`;
+    while [ $RESULT == "\"ABORTED\"" ]
+	do
+		CURRENT_BUILD_NUMBER=$(( $CURRENT_BUILD_NUMBER - 1 ))
+		BUILD_STATUS_QUERY=/${CURRENT_BUILD_NUMBER}/api/json
+		JOB_STATUS_JSON=`curl --silent ${JENKINS_SERVER}${JOB_QUERY}${BUILD_STATUS_QUERY}`
+		RESULT=`echo "${JOB_STATUS_JSON}" | sed -n 's/.*"result":\([\"A-Za-z]*\),.*/\1/p'`;
+	done
+	
+	if [[ $LAST_STABLE_BUILD_NUMBER == *"is not available"* ]] || [[ $LAST_STABLE_BUILD_NUMBER == *"404 Not Found"* ]]
+	then	
+		LAST_STABLE_BUILD_NUMBER='Not available';
+	fi
+	
+	if [ "${RESULT}" = "\"SUCCESS\"" ]
+    then
+        echo -e "'${JOB}' (${CURRENT_BUILD_NUMBER} build). ${GREEN}Status ${RESULT}.${CLEAR}";
+		return 0;
+    elif [ "${RESULT}" = "\"FAILURE\"" ]
+    then
+        echo -e "'${JOB}' (${CURRENT_BUILD_NUMBER} build). ${RED}Status ${RESULT}.${CLEAR}";
+		echo -e "${LIGHT_BLUE}Last stable build ${LAST_STABLE_BUILD_NUMBER}${CLEAR}";
+		return 2;
+    elif [ "${RESULT}" = "\"UNSTABLE\"" ]
+    then
+        echo -e "'${JOB}' (${CURRENT_BUILD_NUMBER} build). ${YELLOW}Status ${RESULT}.${CLEAR}"
+		echo -e "${LIGHT_BLUE}Last stable build ${LAST_STABLE_BUILD_NUMBER}${CLEAR}"
+		return 1;
+    else
+        echo -e "${RED}Status unknown! Please check manually${CLEAR}";
+		return 2;
+    fi
+}
+
+check_build;
+var=$?;
+if [[ $var == 0 ]] 
+then
+	exit 0;
+fi
+
+if [[ $var == 2 ]] 
+then
+	echo -e ${RED}"Push not recommend!!!"${CLEAR};
+fi
+echo -e "Push? (y/n)";
+read isPush;
+case "$isPush" in 
+	  y|Y ) echo -e ${YELLOW}"pushing"${CLEAR}; exit 0;;
+	  n|N ) echo -e ${YELLOW}"push canceled"${CLEAR}; exit 1;;
+esac
+exit 1;
+
